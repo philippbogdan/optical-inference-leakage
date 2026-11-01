@@ -1,4 +1,4 @@
-"""Check noise statistics, estimator bias and external-only weight exports."""
+"""Check Gaussian channel units, sampled noise and external-only weight exports."""
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,20 +9,30 @@ from optical_inference_leakage import real_copy_data as real
 
 
 class RealCopyChecks(unittest.TestCase):
-    def test_nested_deliveries_and_fixed_crop_shrinkage(self):
-        crop = np.full((256, 256), 2.0)
-        pack, rows = real.simulate(crop, s=1, v=1, counts=(1, 2, 4), seed=23)
-        noise = pack['average'] - crop
-        increment = 2 * noise[1] - noise[0]
-        self.assertLess(abs(np.corrcoef(noise[0].ravel(), increment.ravel())[0, 1]), 0.02)
-        self.assertAlmostEqual(float(np.mean(noise[0] * noise[1])), 0.5, delta=0.02)
-        for i, k in enumerate(pack['K']):
-            self.assertAlmostEqual(float(np.mean(noise[i] ** 2)), 1 / k, delta=0.02 / k)
-        self.assertAlmostEqual(float(np.mean(pack['estimate'][0])), 1.0, delta=0.01)
-        self.assertAlmostEqual(rows[0]['estimate_rmse'] ** 2, 1.25, delta=0.02)
-        self.assertAlmostEqual(rows[0]['expected_estimate_rms_pct_matrix'], 100 * np.sqrt(1.25))
-        self.assertNotAlmostEqual(rows[0]['expected_estimate_rms_pct_matrix'],
-                                  rows[0]['gaussian_prior_rms_pct_matrix'])
+    def test_bits_invert_channel_and_final_variance_is_stored(self):
+        levels, variances = real.noise_schedule(s=12, v=0.01)
+        self.assertAlmostEqual(variances[1], 4.0)
+        self.assertAlmostEqual(variances[2], 12 / 63)
+        self.assertEqual(variances[-1], 0.01)
+        np.testing.assert_allclose(0.5 * np.log2(1 + 12 / variances), levels, rtol=1e-14)
+        self.assertAlmostEqual(levels[-1], 0.5 * np.log2(1201))
+
+    def test_common_noise_field_and_fixed_crop_normalisations(self):
+        crop = np.full((128, 128), 2.0)
+        pack, rows = real.simulate(crop, s=1, v=0.0001, seed=23)
+        repeated, _ = real.simulate(crop, s=1, v=0.0001, seed=23)
+        np.testing.assert_array_equal(pack['copy'], repeated['copy'])
+        self.assertEqual(pack['copy'].shape, (4, 128, 128))
+        for i, row in enumerate(rows):
+            noise = pack['copy'][i] - crop
+            np.testing.assert_allclose(noise / row['noise_std'], pack['standard_normal'], atol=1e-13)
+            self.assertAlmostEqual(float(np.mean(noise ** 2)) / row['noise_variance'], 1, delta=0.04)
+            self.assertEqual(row['noise_rms_pct_matrix'], 2 * row['noise_rms_pct_crop'])
+            self.assertAlmostEqual(row['measured_rmse'], float(np.sqrt(np.mean(noise ** 2))))
+        self.assertEqual(rows[-1]['noise_variance'], 0.0001)
+        self.assertEqual([r['p0_one_text'] for r in rows], [False, False, False, True])
+        # A constant crop retains its mean; no low-information shrinkage is applied.
+        self.assertAlmostEqual(float(np.mean(pack['copy'][0])), 2.0, delta=0.06)
 
     def test_digest_accepts_known_bytes_and_rejects_modified_bytes(self):
         expected = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
@@ -47,12 +57,25 @@ class RealCopyChecks(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Unsafe output target'):
                 real.output_directory(root)
 
-    def test_wrong_run_and_invalid_copy_counts_are_rejected(self):
+    def test_wrong_run_and_invalid_channel_levels_are_rejected(self):
         with self.assertRaisesRegex(ValueError, 'strict-quality'):
             real.parameters(dict(model=real.MODEL, level=0.02))
-        for counts in ((0,), (2, 1), (1, 1), (1.5,)):
-            with self.assertRaisesRegex(ValueError, 'Text counts'):
-                real.simulate(np.ones((2, 2)), 1, 1, counts=counts)
+        for bits in ((), (0,), (-1,), (np.inf,), (np.nan,), (2, 1), (1, 1), (8,)):
+            with self.assertRaisesRegex(ValueError, 'Bit levels'):
+                real.noise_schedule(1, 0.0001, bits=bits)
+        for s, v in ((0, 1), (1, 0), (np.inf, 1), (1, -1)):
+            with self.assertRaisesRegex(ValueError, 'positive'):
+                real.noise_schedule(s, v)
+
+    def test_multiply_linked_output_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'original'
+            source.write_bytes(b'preserved')
+            (root / real.FILES[0]).hardlink_to(source)
+            with self.assertRaisesRegex(ValueError, 'hard links'):
+                real.output_directory(root)
+            self.assertEqual(source.read_bytes(), b'preserved')
 
 
 if __name__ == '__main__':

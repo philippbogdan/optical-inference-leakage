@@ -18,8 +18,24 @@ def figure_count_sentence(tables, scaling):
             f"the supporting floor pack has {len(tables['floors'])} comparisons.")
 
 
+def hero_schedule(tables):
+    matrix = next(r for r in tables['matrices'] if r['model'] == real_copy_data.MODEL
+                  and r['level'] == 0.005 and r['key'] == real_copy_data.MATRIX_KEY)
+    return real_copy_data.noise_schedule(matrix['mean_square'], matrix['noise_variance'])
+
+
+def hero_noise_sentence(tables):
+    bits, variances = hero_schedule(tables)
+    levels = ', '.join(f'{b:.3f}' for b in bits)
+    sigmas = ', '.join(f'{v ** 0.5:.9g}' for v in variances)
+    return (f'At {levels} bits per weight, the noise standard deviations are {sigmas}, '
+            'respectively, in the original weight units. The last variance is taken directly '
+            'from the stored P0 one-text run at the 0.5% quality allowance, without rounding the bit level.')
+
+
 def readme_page(tables, scaling):
     strict = [r for r in tables['summary'] if r['level'] == 0.005]
+    one = [r['L1'] for r in strict]
     many = [r['Lmillion'] for r in strict]
     ratios = {}
     for count in ('1', '1e6'):
@@ -27,17 +43,20 @@ def readme_page(tables, scaling):
         ratios[count] = (min(values), max(values))
     attacks = [100 * r['fraction'] for r in tables['attacks']]
     fit_error = 100 * max(abs(r['relative_error']) for r in scaling)
+    p0_bits = hero_schedule(tables)[0][-1]
     return f'''# Know what your optical inference client learns
 
-{headline(tables['summary'])} The client's text stays private because nothing returns to the server.
+Secure inference lets a client get a model's answers without revealing its data, while the owner wants to keep the model's learned parameters, or weights, private. Optical protocols send those weights as light and use the client's optics and detectors to multiply them by its data. Light's quantum noise, together with any added noise, limits what the client can learn about the weights under every measurement quantum mechanics allows. In the simple protocol studied here, bright light makes shot noise negligible, so deliberately added Gaussian noise sets the leakage. Our preliminary Qwen3 Base simulations keep WikiText-2 perplexity within 0.5% of digital BF16 while exposing {min(one):.1f} to {max(one):.1f} bits per weight after one 2,048-token text, already close to our conditional minimum for the smaller models.
+
+![A 128 by 128 real Qwen3-0.6B crop with horizontal bands, followed by simulated noisy copies at 0.1, 1, 3 and {p0_bits:.3f} bits per weight. The bands emerge as the noise falls; the last panel is P0 after one text.](figures/bits-per-weight.png)
+
+*A real Qwen3-0.6B crop (left) sits beside copies simulated at 0.1, 1, 3 and {p0_bits:.3f} bits per weight, all on the same colour scale. The last copy uses P0's stored noise for one text at the 0.5% quality allowance.*
+
+[Matrix, noise and error checks](results/README.md#the-clients-copy)
+
+The client's text stays private because nothing returns to the server.
 
 For the 0.6B and 1.7B models, the simple protocol is within about **{100 * (ratios['1'][1] - 1):.0f}% of our conditional minimum after one text**, and **{100 * (ratios['1e6'][1] - 1):.0f}% after a million tokens**. Under the bound's assumptions, doing much better needs a different kind of protocol, such as one where light returns to the server.
-
-![A real Qwen3-0.6B matrix crop followed by simulated client copies after 1, 10, 100 and 489 texts at the stored noise level for the 0.5% quality allowance. The five square panels show matching fine row patterns, with one shared blue-to-brown colour bar below.](figures/real-weight-copy.png)
-
-*A real Qwen3-0.6B matrix crop (left) sits beside simulated client copies after 1, 10, 100 and 489 texts at the stored noise level for the 0.5% quality allowance. All five panels share one colour scale; even the one-text copy looks almost identical to the original.*
-
-[Matrix, estimator and error checks](results/README.md#the-clients-copy)
 
 ## More use gives the client a sharper copy
 
@@ -119,14 +138,12 @@ def result_page(tables, scaling):
         '| [convexity.csv](convexity.csv) | Sampled curvature estimates, standard errors and significance flags |',
         '| [fidelity.csv](fidelity.csv) | Relative moment errors on the small optical instance |', '',
         'The attack estimates reach 99.99% to 100% of the P0 values when rounded to two decimal places. Sampling uses 20,000 modes per matrix and scales their i.i.d. contributions; the estimates and intervals are Monte Carlo quantities, not certified finite-sample bounds. One geometric-mean SNR per matrix type predicts leakage within 1.6% for every case. At the strictest allowance, type SNRs are approximately 1,200 to 83,000 except the separate 8B input embedding, at 14.1. The small optical moment check has maximum array-normalised relative error 0.00043.', '']
-    matrix = next(r for r in tables['matrices'] if r['model'] == real_copy_data.MODEL
-                  and r['level'] == 0.005 and r['key'] == real_copy_data.MATRIX_KEY)
-    predicted = [matrix['noise_rms_pct'] / k ** 0.5 for k in real_copy_data.COUNTS]
     lines += ['', "## The client's copy", '',
-        'The hero compares the top-left 512 by 512 entries of model.layers.14.self_attn.q_proj.weight in pinned Qwen3-0.6B with simulated copies after 1, 10, 100 and 489 texts. Rows and columns keep their original order. This middle-layer query projection has ordinary noise for this model; the crop was fixed by position, without searching for a favourable noise realisation. All panels use one zero-centred asinh colour scale in units of the full matrix weight RMS, with limits -10 to 10 and a linear width of 1. No displayed entries are clipped.', '',
-        'Each text supplies W + Z with independent Gaussian entries of variance v from the 0.5% run. The panels share one cumulative sequence of deliveries. The displayed estimate multiplies their average by s/(s+v/K), the population Gaussian-prior linear estimator corresponding to the attack. It does not fit a new estimator on the real crop or assert that trained weights follow a Gaussian prior. The export retains both the plain average and the linear estimate.', '',
-        f'For this matrix, plain averaging predicts RMS errors of {predicted[0]:.3f}%, {predicted[1]:.3f}%, {predicted[2]:.3f}% and {predicted[3]:.3f}% at those counts, relative to the full matrix weight RMS. The crop has different weight power, so its own relative errors differ. The separate [real-weight export](../REPRODUCE.md#real-weight-hero) measures both normalisations and verifies the sampled errors against their expectations; the model-free CPU check verifies the predictions from the stored run, not the downloaded weights.', '',
-        'The illustration uses the bright-limit noise model at the measured whole-model quality allowance. It neither remeasures perplexity for these copies nor demonstrates optical hardware, full-model recovery or bitwise equality with BF16 weights. [Qwen](../THIRD_PARTY.md) supplies the underlying weights under [Apache-2.0](../figures/QWEN-LICENSE.txt).', '',
+        'The hero uses rows [384:512] and columns [128:256] of model.layers.6.self_attn.k_proj.weight in pinned Qwen3-0.6B: a contiguous 128 by 128 crop with 16,384 weights in their original order. It was selected for visible horizontal bands by comparing row and column RMS dispersion across grid crops before drawing noise. It is a structural illustration, not a representative sample of all weights. Every panel uses the same monotone grayscale mapping, asinh(weight/sqrt(s)), with fixed bounds asinh(-20) and asinh(20); no entries are clipped.', '',
+        'The displayed copies are plain observations W + sigma*G, without shrinkage or denoising. One fixed i.i.d. standard-normal field G is scaled across the four hypothetical leak levels, so differences isolate noise strength; the panels are not successive texts. For full-matrix mean square s, b = 0.5*log2(1+s/variance), giving sigma = sqrt(s)/sqrt(2**(2*b)-1). The smallest level is 0.1 because zero bits would require infinite noise in this unshrunk channel. Linear shrinkage would instead suppress the low-information copy towards zero, changing what is being illustrated.', '',
+        hero_noise_sentence(tables), '',
+        'The bit labels describe the Gaussian channel at the full matrix power, not measured mutual information in this selected trained crop. Its power differs from s. The separate [real-weight export](../REPRODUCE.md#real-weight-hero) retains the common noise field, reports errors relative to both matrix and crop RMS, and checks sampled RMS against sigma. The model-free CPU command checks the bit-to-noise arithmetic and numerical prose from the stored run; it does not open the downloaded weights.', '',
+        'Only the final channel uses the stored whole-model quality operating point. The lower leak levels are illustrative noise settings, not measured quality-preserving protocols. The figure does not remeasure perplexity, demonstrate optical hardware or full-model recovery, or establish bitwise equality with BF16 weights. [Qwen](../THIRD_PARTY.md) supplies the underlying weights under [Apache-2.0](../figures/QWEN-LICENSE.txt).', '',
         'The motion shows expected error, calculated from the stored mean squares and noise variances at every integer text count from 1 to 489. It shows no trained weights, synthetic weights or sampled error realisations. Each band extends from minus to plus one RMS error about zero estimation error; it is not a confidence interval or a claim that every weight falls inside it.', '',
         'For an independent matrix view, Gamma = s/v and relative RMS error is 1/sqrt(K*Gamma), measured against the matrix weight RMS, not the magnitude of an individual weight. The copy is the unbiased average of repeated noisy observations. For tied embedding and head views, add their SNRs before computing the error: they are observations of the same weights. The motion has one band entry per unique matrix; its bands narrow by sqrt(489), about 22 times, from start to finish.', '',
         'The bands use fixed symmetric logarithmic error axes, linear within 0.01% of zero, spanning -60% to 60%. The horizontal matrix index follows layers and projection types, then the embedding and head; it is not a weight index. Every matrix has equal horizontal width, regardless of its weight count. The lower curves use L(K) = sum_l N_l/(2*N)*log2(1+K*Gamma_l), with weights counted once. All four models and all three allowances appear, with no smoothing, fitted values or inferred measurements between quality settings.', '',

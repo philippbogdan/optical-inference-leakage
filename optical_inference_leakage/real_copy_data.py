@@ -1,4 +1,4 @@
-"""Export a real weight crop and simulated client estimates outside the repository."""
+"""Export a real weight crop and noisy copies at specified Gaussian leak levels."""
 import argparse
 import hashlib
 import json
@@ -13,10 +13,12 @@ MODEL = 'Qwen3-0.6B'
 REVISION = 'da87bfb608c14b7cf20ba1ce41287e8de496c0cd'
 WEIGHTS_SHA256 = 'cd2a512003e2f9f3cd3c32a9c3573f820bb28c940f73c57b1ddaa983d9223eba'
 RUN_PATH = 'data/runs/llm_Qwen3-0.6B_0.005.json'
-MATRIX_KEY = 'L14.q_proj'
-TENSOR_KEY = 'model.layers.14.self_attn.q_proj.weight'
-CROP = (0, 512, 0, 512)
-COUNTS = (1, 10, 100, 489)
+MATRIX_KEY = 'L6.k_proj'
+TENSOR_KEY = 'model.layers.6.self_attn.k_proj.weight'
+TENSOR_SHAPE = (1024, 1024)
+CROP = (384, 512, 128, 256)
+BIT_LEVELS = (0.1, 1.0, 3.0)
+RENDERED_FILE = 'figures/bits-per-weight.png'
 SEED = 20261101
 FILES = ('real-weight-copy.npz', 'real-weight-copy-errors.csv', 'real-weight-copy-manifest.json')
 
@@ -67,7 +69,7 @@ def extract_crop(weights, s, count):
 
     with safe_open(weights, framework='pt', device='cpu') as tensors:
         tensor = tensors.get_tensor(TENSOR_KEY)
-        if tensor.dtype != torch.bfloat16 or tuple(tensor.shape) != (2048, 1024):
+        if tensor.dtype != torch.bfloat16 or tuple(tensor.shape) != TENSOR_SHAPE:
             raise ValueError('Unexpected tensor dtype or shape')
         matrix = tensor.float().numpy().astype(np.float64)
     power = float(np.mean(matrix ** 2))
@@ -78,59 +80,53 @@ def extract_crop(weights, s, count):
         tensor_shape=list(matrix.shape), dtype='BF16', measured_matrix_mean_square=power)
 
 
-def simulate(crop, s, v, counts=COUNTS, seed=SEED):
-    """Accumulate independent deliveries, retaining nested averages and linear estimates."""
+def noise_schedule(s, v, bits=BIT_LEVELS):
+    """Append the stored one-text variance to the illustrative Gaussian channels."""
+    if not np.isfinite([s, v]).all() or min(s, v) <= 0:
+        raise ValueError('Weight power and noise variance must be finite and positive')
+    bits = np.asarray(bits, dtype=np.float64)
+    if bits.ndim != 1 or not bits.size or not np.isfinite(bits).all() or np.any(bits <= 0):
+        raise ValueError('Bit levels must be finite and positive')
+    p0_bits = 0.5 * np.log2(1 + s / v)
+    if np.any(np.diff(bits) <= 0) or bits[-1] >= p0_bits:
+        raise ValueError('Bit levels must increase strictly before the stored P0 level')
+    variance = s / np.expm1(2 * bits * np.log(2))
+    return np.append(bits, p0_bits), np.append(variance, v)
+
+
+def simulate(crop, s, v, bits=BIT_LEVELS, seed=SEED):
+    """Scale one fixed Gaussian field to isolate noise strength across leak levels."""
     crop = np.asarray(crop, dtype=np.float64)
     if crop.ndim != 2 or not crop.size or not np.isfinite(crop).all():
         raise ValueError('The crop must be a finite, nonempty matrix')
-    if not counts or any(int(k) != k or k <= 0 for k in counts) or tuple(sorted(set(counts))) != tuple(counts):
-        raise ValueError('Text counts must be distinct, increasing positive integers')
-    if not np.isfinite([s, v]).all() or min(s, v) <= 0:
-        raise ValueError('Weight power and noise variance must be finite and positive')
     power = float(np.mean(crop ** 2))
     if power <= 0:
         raise ValueError('The crop must have positive weight power')
-    rng = np.random.Generator(np.random.PCG64(seed))
-    noise_sum = np.zeros_like(crop)
-    averages, estimates, rows = [], [], []
-    for k in range(1, int(counts[-1]) + 1):
-        noise_sum += rng.normal(0, np.sqrt(v), size=crop.shape)
-        if k not in counts:
-            continue
-        average = crop + noise_sum / k
-        gain = s / (s + v / k)
-        estimate = gain * average
-        average_mse = float(np.mean((average - crop) ** 2))
-        estimate_mse = float(np.mean((estimate - crop) ** 2))
-        expected_average_mse = v / k
-        expected_estimate_mse = (1 - gain) ** 2 * power + gain ** 2 * v / k
-        rms_ratio = np.sqrt(average_mse / expected_average_mse)
-        linear_ratio = np.sqrt(estimate_mse / expected_estimate_mse)
-        if abs(rms_ratio - 1) > 6 / np.sqrt(2 * crop.size) or abs(linear_ratio - 1) > 6 / np.sqrt(2 * crop.size):
-            raise ValueError(f'K={k}: sampled RMS disagrees with the noise model')
-        rows.append(dict(K=k, entries=crop.size, stored_mean_square=s, noise_variance=v,
-            gamma=s / v, crop_mean_square=power, shrinkage=gain,
-            average_rmse=np.sqrt(average_mse), estimate_rmse=np.sqrt(estimate_mse),
-            average_rms_pct_matrix=100 * np.sqrt(average_mse / s),
-            estimate_rms_pct_matrix=100 * np.sqrt(estimate_mse / s),
-            average_rms_pct_crop=100 * np.sqrt(average_mse / power),
-            estimate_rms_pct_crop=100 * np.sqrt(estimate_mse / power),
-            expected_average_rms_pct_matrix=100 * np.sqrt(v / (k * s)),
-            expected_average_rms_pct_crop=100 * np.sqrt(v / (k * power)),
-            expected_estimate_rms_pct_matrix=100 * np.sqrt(expected_estimate_mse / s),
-            gaussian_prior_rms_pct_matrix=100 / np.sqrt(1 + k * s / v),
-            average_observed_expected_ratio=rms_ratio,
-            estimate_observed_expected_ratio=linear_ratio,
-            estimator_change_rms_pct_matrix=100 * np.sqrt(np.mean((estimate - average) ** 2) / s),
-            estimate_max_abs_error=float(np.max(abs(estimate - crop)))))
-        averages.append(average)
-        estimates.append(estimate)
-    return dict(K=np.array(counts, dtype=np.int64), original=crop,
-                average=np.stack(averages), estimate=np.stack(estimates)), rows
+    levels, variances = noise_schedule(s, v, bits)
+    noise = np.random.Generator(np.random.PCG64(seed)).standard_normal(crop.shape)
+    copies = crop[None, :, :] + np.sqrt(variances)[:, None, None] * noise
+    rows = []
+    for i, (level, variance, copy) in enumerate(zip(levels, variances, copies)):
+        rmse = float(np.sqrt(np.mean((copy - crop) ** 2)))
+        sigma = float(np.sqrt(variance))
+        ratio = rmse / sigma
+        if abs(ratio - 1) > 6 / np.sqrt(2 * crop.size):
+            raise ValueError(f'b={level}: sampled RMS disagrees with the noise model')
+        rows.append(dict(panel=i + 1, bits_per_weight=float(level),
+            p0_one_text=i == len(levels) - 1, entries=crop.size,
+            stored_mean_square=s, stored_p0_noise_variance=v, crop_mean_square=power,
+            noise_variance=float(variance), noise_std=sigma,
+            noise_rms_pct_matrix=100 * sigma / np.sqrt(s),
+            noise_rms_pct_crop=100 * sigma / np.sqrt(power),
+            measured_rmse=rmse, measured_rms_pct_matrix=100 * rmse / np.sqrt(s),
+            measured_rms_pct_crop=100 * rmse / np.sqrt(power),
+            observed_expected_ratio=ratio))
+    return dict(original=crop, bits_per_weight=levels, noise_variance=variances,
+                standard_normal=noise, copy=copies), rows
 
 
 def export(weights, destination):
-    """Write data and provenance only; no weights are saved inside the repository."""
+    """Write only data and provenance, with all numerical weights outside the repository."""
     destination = output_directory(destination)
     checksums = json.loads((ROOT / 'data/checksums.json').read_text())
     run_hash = verify_sha256(ROOT / RUN_PATH, checksums[RUN_PATH])
@@ -138,12 +134,14 @@ def export(weights, destination):
     s, v, count = parameters(run)
     crop, metadata = extract_crop(weights, s, count)
     pack, rows = simulate(crop, s, v)
-    display_max = float(max(np.max(abs(pack[name])) for name in ('original', 'estimate')) / np.sqrt(s))
-    if display_max > 10:
+    display_max = float(max(np.max(abs(pack[name])) for name in ('original', 'copy')) / np.sqrt(s))
+    if display_max > 20:
         raise ValueError('The shared colour limits would clip a displayed weight')
     destination.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(destination / FILES[0], **pack)
     write_csv(destination / FILES[1], rows)
+    row_rms = np.sqrt(np.mean(crop ** 2, axis=1))
+    column_rms = np.sqrt(np.mean(crop ** 2, axis=0))
     manifest = dict(
         model=MODEL, revision=REVISION, weights_sha256=WEIGHTS_SHA256,
         weights_credit='Qwen team', weights_terms='Apache-2.0',
@@ -152,22 +150,27 @@ def export(weights, destination):
         crop=dict(row_start=CROP[0], row_stop=CROP[1], column_start=CROP[2], column_stop=CROP[3],
                   indexing='zero-based, stop-exclusive; no reordering'),
         **metadata, stored_mean_square=s, crop_mean_square=float(np.mean(crop ** 2)),
-        noise_variance=v, gamma=s / v, seed=SEED, generator='PCG64', numpy_version=np.__version__,
-        text_counts=list(COUNTS), quality_allowance=run['level'],
-        displayed_array='estimate', estimator='Population Gaussian-prior linear shrinkage s/(s+v/K) times the cumulative average.',
-        sampling='One independent Gaussian noise matrix per text; all panels share the same cumulative trajectory.',
-        interpretation='A simulated bright-limit copy of a real BF16 matrix crop, not an optical measurement or a full-model recovery.',
-        formulas=dict(average_expected_rms='sqrt(v/K)',
-                      average_relative_rms='1/sqrt(K*gamma), normalised by sqrt(stored s)',
-                      estimate_expected_mse='(1-gain)^2*crop_mean_square + gain^2*v/K',
-                      gaussian_prior_relative_rms='1/sqrt(1+K*gamma)',
-                      validation='Both sampled RMS values within 6/sqrt(2*crop.size) of their respective expectations'),
+        stored_p0_noise_variance=v, p0_bits_per_weight=float(pack['bits_per_weight'][-1]),
+        seed=SEED, generator='PCG64', numpy_version=np.__version__,
+        bits_per_weight=pack['bits_per_weight'].tolist(), quality_allowance=run['level'],
+        displayed_array='copy', estimator='None: unshrunk noisy observations W + sigma(b)*G.',
+        sampling='One fixed i.i.d. standard-normal field, scaled across hypothetical channels. These are not successive texts.',
+        interpretation='Gaussian-channel information at full-matrix power s, not measured information in this selected trained crop.',
+        crop_selection='Maximum row/column RMS dispersion on contiguous 128-square grid crops of untied projections with stored P0 levels 5.8 to 6.5 bits. No noise used in selection.',
+        crop_structure=dict(row_rms_min=float(min(row_rms)), row_rms_max=float(max(row_rms)),
+            column_rms_min=float(min(column_rms)), column_rms_max=float(max(column_rms)),
+            score=float(max(np.std(row_rms), np.std(column_rms)) / np.sqrt(np.mean(crop ** 2)))),
+        formulas=dict(bits='0.5*log2(1+s/variance)', variance='s/(2**(2*b)-1)',
+                      p0_variance='Stored v used directly, without rounding b',
+                      expected_rmse='sqrt(variance)', relative_rmse='sqrt(variance/s)',
+                      validation='Sampled RMS within 6/sqrt(2*crop.size) of its expectation'),
         colour=dict(weight_scale=float(np.sqrt(s)), transform='asinh(weight/sqrt(s))',
-                    limits_in_weight_rms=[-10, 10], linear_width_in_weight_rms=1,
-                    max_abs_displayed_in_weight_rms=display_max, clipped_entries=0),
+                    limits_in_weight_rms=[-20, 20], linear_width_in_weight_rms=1,
+                    max_abs_displayed_in_weight_rms=display_max, clipped_entries=0,
+                    palette='Monotone grayscale, negative dark and positive light'),
         array_shapes={name: list(array.shape) for name, array in pack.items()},
         pack_sha256={name: sha256(destination / name) for name in FILES[:2]},
-        rendered_files=['figures/real-weight-copy.png'],
+        rendered_files=[RENDERED_FILE],
         rendering_terms='Retain Qwen credit and Apache-2.0 terms for weight-derived imagery.')
     (destination / FILES[2]).write_text(json.dumps(manifest, indent=2) + '\n')
     return rows
@@ -180,10 +183,10 @@ def main():
                         help='Data destination outside the repository (default: ../figure-pack)')
     args = parser.parse_args()
     for row in export(args.weights, args.output):
-        print(f"K={row['K']:3d}: linear estimate RMS {row['estimate_rms_pct_matrix']:.6f}% of matrix RMS; "
-              f"{row['estimate_rms_pct_crop']:.6f}% of crop RMS; "
-              f"average/theory {row['average_observed_expected_ratio']:.6f}")
-    print('PASS: pinned weights and run verified; all sampled errors agree with theory. Data written outside the repository.')
+        print(f"b={row['bits_per_weight']:.9f}: sigma={row['noise_std']:.12g}; "
+              f"{row['noise_rms_pct_matrix']:.6f}% of matrix RMS; "
+              f"sample/theory {row['observed_expected_ratio']:.6f}")
+    print('PASS: pinned weights and run verified; sampled errors agree with theory. Data written outside the repository.')
 
 
 if __name__ == '__main__':

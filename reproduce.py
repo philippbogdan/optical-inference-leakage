@@ -109,6 +109,8 @@ def check_prose(tables, scaling):
             raise ValueError(f'{name}: prose differs from recomputed tables')
     if presentation.figure_count_sentence(tables, scaling) not in (ROOT / 'REPRODUCE.md').read_text():
         raise ValueError('REPRODUCE.md: figure counts differ from recomputed tables')
+    if presentation.hero_noise_sentence(tables) not in (ROOT / 'REPRODUCE.md').read_text():
+        raise ValueError('REPRODUCE.md: hero bit levels or noise differ from the stored run')
 
 
 def main():

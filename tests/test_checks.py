@@ -101,6 +101,21 @@ class EvidenceChecks(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'README.md'):
                 reproduce.check_prose(tables, rc.scaling(runs))
 
+    def test_changed_hero_noise_value_is_rejected(self):
+        runs = reproduce.load_runs()
+        tables = reproduce.table_rows(runs, detailed=False)
+        with (reproduce.ROOT / 'results/attacks.csv').open() as stream:
+            tables['attacks'] = [dict(r, fraction=float(r['fraction'])) for r in csv.DictReader(stream)]
+        original = reproduce.Path.read_text
+        def altered(path, *args, **kwargs):
+            text = original(path, *args, **kwargs)
+            if path == reproduce.ROOT / 'REPRODUCE.md':
+                text = text.replace('0.100, 1.000, 3.000, 5.895', '0.100, 1.000, 3.000, 6.500')
+            return text
+        with patch.object(reproduce.Path, 'read_text', altered):
+            with self.assertRaisesRegex(ValueError, 'hero bit levels or noise'):
+                reproduce.check_prose(tables, rc.scaling(runs))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,14 +1,16 @@
 # Know what your optical inference client learns
 
-Sending Qwen3 Base weights as light exposes 5.4 to 6.5 bits per weight after one 2,048-token text while keeping WikiText-2 perplexity within 0.5% of digital BF16. Preliminary simulations. The client's text stays private because nothing returns to the server.
+Secure inference lets a client get a model's answers without revealing its data, while the owner wants to keep the model's learned parameters, or weights, private. Optical protocols send those weights as light and use the client's optics and detectors to multiply them by its data. Light's quantum noise, together with any added noise, limits what the client can learn about the weights under every measurement quantum mechanics allows. In the simple protocol studied here, bright light makes shot noise negligible, so deliberately added Gaussian noise sets the leakage. Our preliminary Qwen3 Base simulations keep WikiText-2 perplexity within 0.5% of digital BF16 while exposing 5.4 to 6.5 bits per weight after one 2,048-token text, already close to our conditional minimum for the smaller models.
+
+![A 128 by 128 real Qwen3-0.6B crop with horizontal bands, followed by simulated noisy copies at 0.1, 1, 3 and 5.895 bits per weight. The bands emerge as the noise falls; the last panel is P0 after one text.](figures/bits-per-weight.png)
+
+*A real Qwen3-0.6B crop (left) sits beside copies simulated at 0.1, 1, 3 and 5.895 bits per weight, all on the same colour scale. The last copy uses P0's stored noise for one text at the 0.5% quality allowance.*
+
+[Matrix, noise and error checks](results/README.md#the-clients-copy)
+
+The client's text stays private because nothing returns to the server.
 
 For the 0.6B and 1.7B models, the simple protocol is within about **28% of our conditional minimum after one text**, and **10% after a million tokens**. Under the bound's assumptions, doing much better needs a different kind of protocol, such as one where light returns to the server.
-
-![A real Qwen3-0.6B matrix crop followed by simulated client copies after 1, 10, 100 and 489 texts at the stored noise level for the 0.5% quality allowance. The five square panels show matching fine row patterns, with one shared blue-to-brown colour bar below.](figures/real-weight-copy.png)
-
-*A real Qwen3-0.6B matrix crop (left) sits beside simulated client copies after 1, 10, 100 and 489 texts at the stored noise level for the 0.5% quality allowance. All five panels share one colour scale; even the one-text copy looks almost identical to the original.*
-
-[Matrix, estimator and error checks](results/README.md#the-clients-copy)
 
 ## More use gives the client a sharper copy
 
