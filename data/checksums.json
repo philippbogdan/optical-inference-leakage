@@ -1,0 +1,16 @@
+{
+  "data/runs/llm_Qwen3-0.6B_0.005.json": "c324c40d91b18cdb73af7796175ece96a80e054289587603411140fe89f7d134",
+  "data/runs/llm_Qwen3-0.6B_0.02.json": "bb33fc36dc0f2be05acd4dedca2b0ee839af91dd1dc684e21690db1b3fe8d58f",
+  "data/runs/llm_Qwen3-0.6B_0.1.json": "c83abb550f5a8a37362f85cbbecdd5cd51bc3059a72930aadacea9d156045871",
+  "data/runs/llm_Qwen3-1.7B_0.005.json": "4373ff7deb72c0e25011569b3fdb144f4f6a0861951495f76bb050ecf6fb14f3",
+  "data/runs/llm_Qwen3-1.7B_0.02.json": "b3a43f875a3bca102a629db6ce32f6df8ff55a2c693021163e57d4a6e5cdddf4",
+  "data/runs/llm_Qwen3-1.7B_0.1.json": "f060a7623ed1f8f5d7039f105cf89abdca4668f3defa8abc6d442713bd8bbb16",
+  "data/runs/llm_Qwen3-4B_0.005.json": "815b250f4f8d3cb23683a4d75a0e159731911fd41158109185b2b764937e9c3e",
+  "data/runs/llm_Qwen3-4B_0.02.json": "b1973a3b870cd90ecca7d8eab99cfd7675641528ed40e5a5e252d186410efdad",
+  "data/runs/llm_Qwen3-4B_0.1.json": "abdcfaf4d400853d8b4b71cb4c438ef44c9d9cf5fb8ef26946fa3d42daf807fc",
+  "data/runs/llm_Qwen3-8B_0.005.json": "95ce33ef05db4cd199c4ca2df357441f2a76e4f45ae1bc02012a7d4071b0de70",
+  "data/runs/llm_Qwen3-8B_0.02.json": "8ef262024aae05923c6595d50f795fc62c3b111b5bc1faf0921765ccd03d34a0",
+  "data/runs/llm_Qwen3-8B_0.1.json": "826cb1b51decf6b04691c18a2983b49a9b0aa56770da9dc78e319f32fefddac4",
+  "data/shapes.csv": "497347ab092d23fbcf856d32d7eb229bb3c83ba85975d591f793c5645a0b57ff",
+  "data/methods.json": "ee99e24953427cf972206ef20f3784661f06e5d87d36bc34a52676e70492359b"
+}

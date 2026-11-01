@@ -1,0 +1,6 @@
+-r requirements.txt
+torch==2.12.1
+transformers==5.15.1
+huggingface_hub==1.28.0
+pandas==3.0.5
+pyarrow==26.0.0

@@ -1,0 +1,64 @@
+{
+  "status": "Measurement settings. The run files do not store the gradient probe count or seed; those settings are recorded here and cannot be verified from the gradient vectors alone.",
+  "quality": {
+    "window_tokens": 2048,
+    "test_windows": 146,
+    "test_tokens_before_truncation": 299078,
+    "noise_draws": 5,
+    "interval": "two-sided Student t",
+    "confidence": 0.95,
+    "validation_margin": 0.8,
+    "validation_windows": 24,
+    "validation_gradient_probes": 64,
+    "allocation_iterations": 4,
+    "validation_draws": 4
+  },
+  "floor": {
+    "gradient_probes": 256,
+    "gradient_seed": 9000,
+    "gradient_interval": "Bonferroni normal approximation",
+    "confidence": 0.95,
+    "honest_spectrum_texts": 8,
+    "honest_spectra_retained": false,
+    "rank_relative_threshold": 0.000001
+  },
+  "convexity": {
+    "log_variance_step": 0.3,
+    "windows": 32,
+    "draws": 4,
+    "directions": ["ray", "attn", "mlp"],
+    "one_sided_confidence": 0.95,
+    "normal_threshold": 1.645
+  },
+  "optics": {
+    "minimum_alpha_squared_times_variance": 10000,
+    "loss_dB_each_direction": [0, 5],
+    "excess_noise_shot_noise_units": [0, 0.01],
+    "distinct_P0_results_per_run": 1
+  },
+  "fidelity": {
+    "seed": 3,
+    "weight_scale": 0.6,
+    "modes": 3,
+    "products": 2,
+    "alpha": 1.3,
+    "variance": 0.05,
+    "fock_cut": 14,
+    "quadrature_points_per_mode": 4
+  },
+  "context_not_reproduced": {
+    "description": "MNIST context for the preliminary argument; underlying measurements are not included",
+    "A1_agreement_snr": 3,
+    "non_gaussian_comparison_snr": 1,
+    "non_gaussian_advantage_percentage_points": 0.4,
+    "non_gaussian_advantage_standard_errors": 1.5,
+    "client_optical_data_estimate_budget": 1,
+    "client_optical_data_estimate_images": 1,
+    "client_optical_data_measured_end_to_end": false
+  },
+  "gpu_memory": {
+    "model": "Qwen3-8B",
+    "estimated_GB": [48, 64],
+    "status": "capacity estimate, not a measured peak"
+  }
+}
