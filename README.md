@@ -44,12 +44,12 @@ For the smaller models, protocol leakage divided by the conditional minimum rang
 
 A simulated client extracts **99.99% to 100.00%** of the calculated information bound under its Gaussian weight model. A fit using the other three model sizes predicts each held-out model's leakage within **3.1%**. [Attack and prediction evidence](results/README.md#attack-and-size-prediction)
 
-## What this does not show
+## Assumptions made
 
-- A hardware demonstration or an independently checked proof: these are preliminary simulations and conditional arguments.
-- A minimum for every optical protocol: the bound assumes fresh, weight-independent errors uniform within each matrix, restricted optical roles and quality assumptions detailed in [THEORY.md](THEORY.md); return-light, shaped-noise and client-encoded-light protocols sit outside it.
-- Recovery of a full trained model file: the hero simulates one real crop, and the information attack uses a Gaussian weight model.
-- Independent recovery of every floor input: the long-text floors at nonzero data budgets use stored measurements whose activation spectra were not retained; [the limitations](results/README.md#conditional-floor-gaps) also explain the weak larger-model bounds.
+- Leakage uses the bright-light limit and independent Gaussian noise across texts; the information attack assumes a Gaussian weight prior with fixed matrix mean squares.
+- The conditional minimum assumes fresh, weight-independent errors uniform within each matrix, weights supplied only through server light and client data supplied only through its own optics and detection.
+- The floor also assumes convex expected loss in noise variances and nonnegative true derivatives; extension to non-Gaussian i.i.d. noise assumes Gaussian noise is quality-optimal. [Full assumptions and argument](THEORY.md).
+- Long-text floors at nonzero data budgets take stored honest-client measurements as inputs. [Input limits and weak larger-model bounds](results/README.md#conditional-floor-gaps).
 
 ## How to use it
 
